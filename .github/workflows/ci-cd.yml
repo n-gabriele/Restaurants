@@ -11,6 +11,7 @@ on:
     pull_request:
       branches:
         - main          # Validation avant merge
+        - develop
 
 # ── VARIABLES GLOBALES ──────────────────────────────────────────────
 # Ces variables sont réutilisables dans tous les jobs
