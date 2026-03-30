@@ -1,0 +1,78 @@
+name: CI/CD — Restaurant API
+
+# ── TRIGGERS — Quand ce pipeline se déclenche ──────────────────────
+on:
+    push:
+      branches:
+        - main          # Déploiement staging automatique
+        - develop       # Build + test uniquement (pas de déploiement)
+      tags:
+        - 'v*.*.*'      # Ex: v1.2.3 → déclenchera le déploiement production
+    pull_request:
+      branches:
+        - main          # Validation avant merge
+
+# ── VARIABLES GLOBALES ──────────────────────────────────────────────
+# Ces variables sont réutilisables dans tous les jobs
+env:
+    # Nom complet de l'image sur Docker Hub
+    # On le construit à partir du secret DOCKERHUB_USERNAME
+    IMAGE_NAME: ${{ secrets.DOCKERHUB_USERNAME }}/restaurant-api
+  
+# ════════════════════════════════════════════════════════════════════
+# JOB 1 — BUILD AND TEST
+# Compile le code .NET et exécute les tests
+# S'exécute sur TOUTES les branches (push et PR)
+# ════════════════════════════════════════════════════════════════════
+jobs:
+  build-and-test:
+    name: Build & Test
+    runs-on: ubuntu-latest   # Machine virtuelle Ubuntu fournie par GitHub
+
+    steps:
+
+      # ── Étape 1 : Cloner le dépôt ──────────────────────────────
+      # Pourquoi : la machine virtuelle est vide au départ.
+      # Cette action copie le code sur la machine.
+      - name: Checkout du code source
+        uses: actions/checkout@v4
+
+      # ── Étape 2 : Installer le SDK .NET 8 ──────────────────────
+      # Pourquoi : la machine Ubuntu n'a pas .NET installé par défaut.
+      # On installe exactement la version 8.0.x utilisée par le projet.
+      - name: Installer .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+       
+        # ── Étape 3 : Mettre en cache les packages NuGet ───────────
+        # Pourquoi : sans cache, chaque exécution re-télécharge tous
+        # les packages NuGet depuis Internet (30-60 secondes supplémentaires).
+        # Avec le cache, si les fichiers .csproj n'ont pas changé,
+        # on réutilise les packages déjà téléchargés → gain de 2-3 minutes.
+      - name: Mettre en cache NuGet
+        uses: actions/cache@v4
+        with:
+            path: ~/.nuget/packages
+            key: ${{ runner.os }}-nuget-${{ hashFiles('**/*.csproj') }}
+            restore-keys: |
+                ${{ runner.os }}-nuget-
+
+        # ── Étape 4 : Restaurer les dépendances ────────────────────
+        # Équivalent de 'dotnet restore' en local.
+        # Télécharge tous les packages NuGet listés dans vos .csproj.
+      - name: Restaurer les dépendances
+        run: dotnet restore
+
+        # ── Étape 5 : Compiler ─────────────────────────────────────
+        # --no-restore : évite de restaurer deux fois (déjà fait à l'étape 4)
+        # --configuration Release : optimise le code pour la production
+      - name: Compiler le projet
+        run: dotnet build --no-restore --configuration Release
+
+        # ── Étape 6 : Exécuter les tests ───────────────────────────
+        # Si un test échoue → ce step échoue → le job échoue
+        # → les Jobs suivants NE s'exécutent PAS
+        # C'est la 'gate' de qualité automatique.
+      - name: Exécuter les tests
+        run: dotnet test --no-build --configuration Release --verbosity normal
